@@ -60,6 +60,9 @@
     color: var(--muted); line-height: 1.7; }
   #feed div:first-child { color: var(--ink); }
 
+  #minimap { position: fixed; right: 24px; top: 108px; width: 168px; height: 140px;
+    background: rgba(22, 19, 15, .72); border: 1px solid var(--hairline); }
+
   #plant-bar { position: fixed; left: 50%; top: 66%; transform: translateX(-50%); width: 260px; height: 8px;
     background: var(--surface); border: 1px solid var(--hairline); }
   #plant-fill { height: 100%; width: 0; background: var(--accent); }
@@ -109,11 +112,17 @@
   .panel h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.15; letter-spacing: .02em; }
   .panel h1 .amber { color: var(--accent); }
   .panel p { margin: 0 0 24px; font-size: 15px; line-height: 1.55; color: var(--muted); }
+  #scoreboard { margin: 0 0 24px; font-family: var(--font-readout); font-size: 14px; }
+  #scoreboard .sb-row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0;
+    border-bottom: 1px solid var(--hairline); color: var(--muted); letter-spacing: .08em; }
+  #scoreboard .sb-row b { color: var(--ink); font-weight: 600; }
+  #scoreboard .sb-row:last-child { border-bottom: 0; }
   #play, #next-round { font: inherit; font-weight: 600; padding: 12px 18px; border: 1px solid var(--accent);
     background: var(--accent); color: var(--canvas); cursor: pointer; }
   #play:hover, #next-round:hover { background: var(--ink); border-color: var(--ink); }
   #play:focus-visible, #next-round:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   #play[hidden], #next-round[hidden] { display: none; }
+  #keys[hidden] { display: none; }
   .keys { margin: 24px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; color: var(--muted); }
   .keys li { display: flex; align-items: center; gap: 8px; }
   .keys kbd { min-width: 24px; padding: 2px 6px; border: 1px solid var(--hairline); font-family: var(--font-readout);
@@ -125,6 +134,7 @@
 <div id="game"></div>
 
 <div id="hud">
+  <canvas id="minimap" width="168" height="140"></canvas>
   <div id="damage-vignette"></div>
   <div id="crosshair"><i></i><i></i><i></i><i></i></div>
   <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
@@ -147,11 +157,12 @@
 
 <div id="buy-menu" hidden>
   <h2>LOADOUT</h2>
-  <p>Buy phase — 1/2/3/4 or click. Enter starts the round early.</p>
+  <p>Buy phase — 1/2/3/4/5 or click. Enter starts the round early.</p>
   <button class="buy-item" id="buy-shotgun" type="button"><span class="buy-key">[1]</span><span class="buy-name">BREACH-12</span><span class="buy-state"></span><span class="buy-price">$600</span></button>
   <button class="buy-item" id="buy-grenade" type="button"><span class="buy-key">[2]</span><span class="buy-name">SPARK-9 GRENADE</span><span class="buy-state"></span><span class="buy-price">$300</span></button>
   <button class="buy-item" id="buy-armor" type="button"><span class="buy-key">[3]</span><span class="buy-name">PLATE VEST</span><span class="buy-state"></span><span class="buy-price">$400</span></button>
   <button class="buy-item" id="buy-ammo" type="button"><span class="buy-key">[4]</span><span class="buy-name">AMMO REFILL</span><span class="buy-state"></span><span class="buy-price">$200</span></button>
+  <button class="buy-item" id="buy-smg" type="button"><span class="buy-key">[5]</span><span class="buy-name">VIPER-9</span><span class="buy-state"></span><span class="buy-price">$900</span></button>
   <button id="buy-close" type="button">CLOSE [B]</button>
 </div>
 
@@ -159,12 +170,13 @@
   <section class="panel" role="dialog" aria-modal="true" aria-labelledby="overlay-title">
     <h1 id="overlay-title">EMBERLINE</h1>
     <p id="overlay-copy">Tactical round shooter in the Kestrel Yard. Attack with VANGUARD — plant the charge at CRANE BAY or TANK FARM. First to 5 rounds takes the match.</p>
+    <div id="scoreboard" hidden></div>
     <button id="play" type="button">DEPLOY</button>
     <button id="next-round" type="button" hidden>NEXT ROUND</button>
     <ul class="keys" id="keys">
       <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</li>
       <li><kbd>Mouse</kbd> Look &nbsp; <kbd>Click</kbd> Fire</li>
-      <li><kbd>R</kbd> Reload &nbsp; <kbd>1</kbd>/<kbd>2</kbd> Weapon</li>
+      <li><kbd>R</kbd> Reload &nbsp; <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> Weapon</li>
       <li><kbd>G</kbd> Grenade &nbsp; <kbd>E</kbd> Hold to plant</li>
       <li><kbd>B</kbd> Buy menu &nbsp; <kbd>Ctrl</kbd> Crouch &nbsp; <kbd>Space</kbd> Jump</li>
     </ul>

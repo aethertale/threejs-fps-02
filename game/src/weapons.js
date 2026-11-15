@@ -7,6 +7,7 @@ import { PALETTE } from './palette.js';
 export const WEAPONS = {
   rifle:   { name: 'HARRIER-7', price: 0,   mag: 30, reserve: 90, gap: 0.096, reload: 1.9, torso: 34, head: 100, spreadStill: 0.0022, spreadMove: 0.028, auto: true },
   shotgun: { name: 'BREACH-12', price: 600, mag: 6,  reserve: 24, gap: 0.85,  reload: 2.6, torso: 12, head: 24,  pellets: 8, spreadStill: 0.02,   spreadMove: 0.035, auto: false },
+  smg:     { name: 'VIPER-9', price: 900, mag: 32, reserve: 96, gap: 0.055, reload: 2.0, torso: 20, head: 55, spreadStill: 0.006, spreadMove: 0.032, auto: true },
 };
 
 const FLASH_TIME = 0.06;
@@ -46,6 +47,20 @@ function buildShotgun(dark, mid, accent) {
   return g;
 }
 
+function buildSmg(dark, mid, accent) {
+  const g = new THREE.Group();
+  g.add(box(0.08, 0.09, 0.26, mid, 0, 0, 0));            // compact receiver
+  g.add(box(0.04, 0.04, 0.22, dark, 0, 0.02, -0.22));    // short barrel
+  g.add(box(0.05, 0.06, 0.06, accent, 0, 0.02, -0.32));  // muzzle tip
+  g.add(box(0.045, 0.16, 0.07, dark, 0.03, -0.11, -0.02)); // side magazine
+  g.add(box(0.06, 0.07, 0.14, dark, 0, -0.02, 0.18));    // stock
+  g.add(box(0.045, 0.08, 0.08, dark, 0, -0.08, 0.05));   // grip
+  g.add(box(0.02, 0.04, 0.12, accent, 0, 0.065, -0.08)); // sight rail
+  g.scale.setScalar(0.8); // keep the SMG out of the centre of the frame
+  g.position.set(VM_POS.x, VM_POS.y, VM_POS.z);
+  return g;
+}
+
 export function createArsenal(camera) {
   // View-model metals: explicit greys (the palette's ink is near-white and
   // hairline is structural steel — neither is a gunmetal).
@@ -55,9 +70,12 @@ export function createArsenal(camera) {
 
   const rifleModel = buildRifle(dark, mid, accent);
   const shotgunModel = buildShotgun(dark, mid, accent);
+  const smgModel = buildSmg(dark, mid, accent);
   shotgunModel.visible = false;
+  smgModel.visible = false;
   camera.add(rifleModel);
   camera.add(shotgunModel);
+  camera.add(smgModel);
 
   // Shared muzzle flash: one plane + one light, re-aimed per weapon.
   const flash = new THREE.Mesh(
@@ -72,6 +90,7 @@ export function createArsenal(camera) {
   const ammo = {
     rifle: { mag: WEAPONS.rifle.mag, reserve: WEAPONS.rifle.reserve },
     shotgun: { mag: WEAPONS.shotgun.mag, reserve: WEAPONS.shotgun.reserve },
+    smg: { mag: WEAPONS.smg.mag, reserve: WEAPONS.smg.reserve },
   };
   const state = { mag: ammo.rifle.mag, reserve: ammo.rifle.reserve, cooldown: 0, reloadLeft: 0, flash: 0, kick: 0 };
   const muzzleWorld = new THREE.Vector3();
@@ -83,12 +102,16 @@ export function createArsenal(camera) {
   };
 
   function def() { return WEAPONS[arsenal.current]; }
-  function model() { return arsenal.current === 'rifle' ? rifleModel : shotgunModel; }
+  function model() {
+    if (arsenal.current === 'rifle') return rifleModel;
+    if (arsenal.current === 'shotgun') return shotgunModel;
+    return smgModel;
+  }
   function muzzleOffset() {
-    // Muzzle tip in camera space; shotgun barrel is longer.
-    return arsenal.current === 'rifle'
-      ? muzzleLocal.set(VM_POS.x, VM_POS.y + 0.02, VM_POS.z - 0.62)
-      : muzzleLocal.set(VM_POS.x, VM_POS.y + 0.03, VM_POS.z - 0.72);
+    // Muzzle tip in camera space; shotgun barrel is longest, SMG shortest.
+    if (arsenal.current === 'rifle') return muzzleLocal.set(VM_POS.x, VM_POS.y + 0.02, VM_POS.z - 0.62);
+    if (arsenal.current === 'shotgun') return muzzleLocal.set(VM_POS.x, VM_POS.y + 0.03, VM_POS.z - 0.72);
+    return muzzleLocal.set(VM_POS.x, VM_POS.y + 0.02, VM_POS.z - 0.52);
   }
 
   arsenal.getMuzzle = function () {
@@ -153,7 +176,7 @@ export function createArsenal(camera) {
   };
 
   arsenal.refill = function () {
-    for (const k of ['rifle', 'shotgun']) {
+    for (const k of ['rifle', 'shotgun', 'smg']) {
       ammo[k].mag = WEAPONS[k].mag;
       ammo[k].reserve = WEAPONS[k].reserve;
     }
@@ -166,7 +189,7 @@ export function createArsenal(camera) {
   };
 
   arsenal.switchTo = function (name) {
-    if (name !== 'rifle' && name !== 'shotgun') return false;
+    if (name !== 'rifle' && name !== 'shotgun' && name !== 'smg') return false;
     if (name === arsenal.current) return false;
     ammo[arsenal.current].mag = state.mag;
     ammo[arsenal.current].reserve = state.reserve;
@@ -180,6 +203,7 @@ export function createArsenal(camera) {
     state.kick = 0;
     rifleModel.visible = name === 'rifle';
     shotgunModel.visible = name === 'shotgun';
+    smgModel.visible = name === 'smg';
     return true;
   };
 
@@ -190,7 +214,9 @@ export function createArsenal(camera) {
 
   arsenal.damage = function (part) {
     const d = def();
-    return part === 'head' ? d.head : d.torso;
+    if (part === 'head') return d.head;
+    if (part === 'legs') return Math.round(d.torso * 0.7);
+    return d.torso;
   };
 
   arsenal.isShotgun = function () { return arsenal.current === 'shotgun'; };

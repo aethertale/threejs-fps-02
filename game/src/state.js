@@ -19,9 +19,10 @@ export function createState() {
       progress: 0, // 0..1 plant/defuse progress
       timer: 0, // seconds to detonation once planted (35)
     },
-    owned: { shotgun: false, grenades: 0, armor: false },
+    owned: { shotgun: false, smg: false, grenades: 0, armor: false },
     kills: 0,
     deaths: 0,
+    headshots: 0,
     result: null, // { win, reason, award } — set at round end
     matchWinner: null, // 'you' | 'foe' | null
   };

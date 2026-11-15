@@ -133,6 +133,42 @@ export function createMap(scene) {
     add(mesh);
   }
 
+  // Site signage — CanvasTexture signs, unlit so they stay legible at dusk.
+  // Visual only: added to the group, never to colliders or shootables, so
+  // they block neither movement nor bullets.
+  const makeSiteSign = (name, site, color) => {
+    const cv = document.createElement('canvas');
+    cv.width = 1024; cv.height = 272;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#101012';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 10;
+    ctx.strokeRect(8, 8, cv.width - 16, cv.height - 16);
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 118px sans-serif';
+    ctx.fillText(name, cv.width / 2, 108);
+    ctx.font = 'bold 62px sans-serif';
+    ctx.fillText(`— ${site} —`, cv.width / 2, 214);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.4, 0.9),
+      new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }),
+    );
+    return sign;
+  };
+  // Facing +z (south, toward the player spawn) so each reads from mid-map.
+  const signA = makeSiteSign('CRANE BAY', 'SITE A', '#ff9a2e');
+  signA.position.set(-14, 3.2, -11.4);
+  group.add(signA);
+  const signB = makeSiteSign('TANK FARM', 'SITE B', '#55bcb2');
+  signB.position.set(14, 3.2, -11.4);
+  group.add(signB);
+
   return {
     colliders,
     shootables,

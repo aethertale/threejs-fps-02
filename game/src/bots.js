@@ -23,7 +23,9 @@ const _dir = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 
 const _bodyGeo = new THREE.BoxGeometry(0.55, 0.75, 0.32);
-const _trimGeo = new THREE.BoxGeometry(0.58, 0.14, 0.35); // wide chest band: team colour must read at 1280x720
+const _trimGeo = new THREE.BoxGeometry(0.62, 0.16, 0.35); // wide chest band: team colour must read at 1280x720
+const _armGeo = new THREE.BoxGeometry(0.09, 0.5, 0.09);
+const _padGeo = new THREE.BoxGeometry(0.18, 0.08, 0.32);
 const _headGeo = new THREE.SphereGeometry(0.16, 14, 10);
 const _visorGeo = new THREE.BoxGeometry(0.2, 0.06, 0.05);
 const _legGeo = new THREE.BoxGeometry(0.17, 0.52, 0.2);
@@ -55,14 +57,32 @@ function buildBotMesh(scene, bot, mats) {
   visor.position.set(0, 1.6, 0.14);
   const gun = new THREE.Mesh(_gunGeo, mats.dark);
   gun.position.set(0.14, 1.12, 0.32);
-  g.add(legL, legR, torso, trim, head, visor, gun);
+  // Arms: held slightly forward as if gripping the gun (base pitch -0.5 rad;
+  // the walk cycle in stepBot swings around this base angle).
+  const armL = new THREE.Mesh(_armGeo, mats.dark);
+  armL.position.set(-0.32, 1.05, 0.08);
+  armL.rotation.x = -0.5;
+  const armR = new THREE.Mesh(_armGeo, mats.dark);
+  armR.position.set(0.32, 1.05, 0.08);
+  armR.rotation.x = -0.5;
+  // Shoulder pads: team trim on top of the torso so the silhouette reads
+  // wider than the chest band alone.
+  const padL = new THREE.Mesh(_padGeo, mats.trim);
+  padL.position.set(-0.28, 1.38, 0);
+  const padR = new THREE.Mesh(_padGeo, mats.trim);
+  padR.position.set(0.28, 1.38, 0);
+  g.add(legL, legR, torso, trim, head, visor, gun, armL, armR, padL, padR);
   g.traverse((m) => { if (m.isMesh) { m.castShadow = true; } });
   torso.userData = { bot, part: 'torso' };
   head.userData = { bot, part: 'head' };
   legL.userData = { bot, part: 'legs' };
   legR.userData = { bot, part: 'legs' };
+  armL.userData = { bot, part: 'torso' };
+  armR.userData = { bot, part: 'torso' };
+  padL.userData = { bot, part: 'torso' };
+  padR.userData = { bot, part: 'torso' };
   scene.add(g);
-  return { group: g, torso, head, legL, legR };
+  return { group: g, torso, head, legL, legR, armL, armR, padL, padR };
 }
 
 export function createBots(scene, map, ctx) {
@@ -86,15 +106,22 @@ export function createBots(scene, map, ctx) {
       target: null, targetIsPlayer: false, loseAt: 0, scanT: 0, holdT: 0,
       fall: 0, noDefuseUntil: 0, holdPos: null, followDx: 0, followDz: 0,
       alertAt: -10, // last time this bot was damaged (damage snaps it alert)
+      seenAt: -10, // last sim time this bot acquired a target (minimap foe dot)
+      walkPhase: 0, // walk-cycle phase, advanced by distance moved
+      prevX: home.x, prevZ: home.z, // position last tick, for walk distance
       path: null, pathIdx: 0, pathTx: 0, pathTz: 0, stuckT: 0, lastPx: 0, lastPz: 0,
     };
     const built = buildBotMesh(scene, bot, mats);
     bot.group = built.group;
     bot.torso = built.torso;
     bot.head = built.head;
+    bot.legL = built.legL;
+    bot.legR = built.legR;
+    bot.armL = built.armL;
+    bot.armR = built.armR;
     bot.group.position.copy(home);
     bot.group.rotation.y = bot.yaw;
-    hitMeshes.push(built.torso, built.head, built.legL, built.legR);
+    hitMeshes.push(built.torso, built.head, built.legL, built.legR, built.armL, built.armR);
     list.push(bot);
     return bot;
   }
@@ -235,7 +262,7 @@ export function createBots(scene, map, ctx) {
     if (ctx.onKill) ctx.onKill(victim, killerTeam);
   }
 
-  function shootAt(bot, seen) {
+  function shootAt(bot, seen, world) {
     // One burst shot: tracer via onShootBot, hit roll, falloff damage 9–15.
     const p = bot.group.position;
     let tx; let ty; let tz;
@@ -252,7 +279,13 @@ export function createBots(scene, map, ctx) {
     // and hit softer than foes, so the player stays the primary damage
     // dealer and rounds last long enough for the bomb objective to matter.
     const allyScale = bot.team === 'you' ? 0.7 : 1;
-    const hitP = Math.max(0.18, Math.min(0.6, 0.62 - dist * 0.013)) * allyScale;
+    // Crouching / airborne players are harder to hit. world may not carry
+    // these fields yet (main.js wires them) — undefined degrades to
+    // standing / on-ground behaviour.
+    const stanceScale = seen.isPlayer
+      ? ((world && world.playerCrouch) ? 0.75 : 1) * ((world && world.playerAirborne) ? 0.9 : 1)
+      : 1;
+    const hitP = Math.max(0.18, Math.min(0.6, 0.62 - dist * 0.013)) * allyScale * stanceScale;
     if (rnd() > hitP) return;
     const dmg = Math.max(9, Math.min(15, Math.round((15 - (dist / PERCEIVE_DIST) * 6 + rnd() * 2 - 1) * (bot.team === 'you' ? 0.6 : 1))));
     if (seen.isPlayer) {
@@ -273,7 +306,7 @@ export function createBots(scene, map, ctx) {
     }
   }
 
-  function combat(bot, seen, dt) {
+  function combat(bot, seen, dt, world) {
     const p = bot.group.position;
     const tx = seen.isPlayer ? bot.lastKnown.x : seen.bot.group.position.x;
     const tz = seen.isPlayer ? bot.lastKnown.z : seen.bot.group.position.z;
@@ -289,7 +322,7 @@ export function createBots(scene, map, ctx) {
     if (now >= bot.fireAt && bot.burstLeft > 0) {
       bot.fireAt = now + 0.12;
       bot.burstLeft -= 1;
-      shootAt(bot, seen);
+      shootAt(bot, seen, world);
       if (bot.burstLeft <= 0) bot.fireAt = now + 0.5 + rnd() * 0.6; // pause between bursts
     }
   }
@@ -367,8 +400,15 @@ export function createBots(scene, map, ctx) {
       }
       return;
     }
+    // Walk-cycle bookkeeping: distance moved this tick advances walkPhase.
+    // The try/finally guarantees the update runs on every early return
+    // below (combat / defuse / rotate / investigate / hold).
+    const _sx = bot.group.position.x;
+    const _sz = bot.group.position.z;
+    try {
     const seen = acquire(bot, world);
     if (seen) {
+      bot.seenAt = now;
       if (!bot.lastKnown) bot.lastKnown = new THREE.Vector3();
       if (seen.isPlayer) bot.lastKnown.set(world.playerPos.x, 0, world.playerPos.z);
       else bot.lastKnown.set(seen.bot.group.position.x, 0, seen.bot.group.position.z);
@@ -380,7 +420,7 @@ export function createBots(scene, map, ctx) {
         bot.burstLeft = 0;
       }
       bot.loseAt = now + 2.5;
-      combat(bot, seen, dt);
+      combat(bot, seen, dt, world);
       return;
     }
     if (bot.state === 'engage') {
@@ -418,12 +458,33 @@ export function createBots(scene, map, ctx) {
     }
     if (bot.state === 'hold') { holdStep(bot, dt); return; }
     patrolStep(bot, dt, world);
+    } finally {
+      // Advance the walk cycle by horizontal distance moved this tick; when
+      // idle, ease the phase back toward a whole-π multiple so the legs
+      // settle to neutral instead of freezing mid-stride.
+      const p = bot.group.position;
+      const moved = Math.hypot(p.x - _sx, p.z - _sz);
+      if (moved > 0.0005) {
+        bot.walkPhase = (bot.walkPhase || 0) + moved * 2.8;
+      } else {
+        const rest = Math.round((bot.walkPhase || 0) / Math.PI) * Math.PI;
+        bot.walkPhase = (bot.walkPhase || 0) + (rest - (bot.walkPhase || 0)) * Math.min(1, dt * 8);
+      }
+      bot.prevX = p.x;
+      bot.prevZ = p.z;
+      const s = Math.sin(bot.walkPhase || 0);
+      if (bot.legL) bot.legL.rotation.x = 0.45 * s;
+      if (bot.legR) bot.legR.rotation.x = -0.45 * s;
+      if (bot.armL) bot.armL.rotation.x = -0.5 - 0.35 * s;
+      if (bot.armR) bot.armR.rotation.x = -0.5 + 0.35 * s;
+    }
   }
 
   return {
     list,
     hitMeshes,
     nav,
+    now() { return now; },
     step(dt, world) {
       now += dt;
       if (world.phase !== 'live') {
@@ -462,6 +523,10 @@ export function createBots(scene, map, ctx) {
         killBot(bot, 'player');
         return { killed: true, bot };
       }
+      // Damage turn-response: a holding / patrolling bot that survives turns
+      // toward its attacker to investigate. 'defuse' already became 'rotate'
+      // above; 'rotate' and 'engage' are left alone.
+      if (bot.state === 'hold' || bot.state === 'patrol') bot.state = 'investigate';
       return { killed: false, bot };
     },
     reset() {
@@ -485,6 +550,14 @@ export function createBots(scene, map, ctx) {
         b.noDefuseUntil = 0;
         b.holdT = 0;
         b.alertAt = -10;
+        b.seenAt = -10;
+        b.walkPhase = 0;
+        b.prevX = b.home.x;
+        b.prevZ = b.home.z;
+        if (b.legL) b.legL.rotation.x = 0;
+        if (b.legR) b.legR.rotation.x = 0;
+        if (b.armL) b.armL.rotation.x = -0.5;
+        if (b.armR) b.armR.rotation.x = -0.5;
         b.path = null; b.pathIdx = 0; b.stuckT = 0;
       }
     },

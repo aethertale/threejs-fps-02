@@ -33,6 +33,7 @@ const player = createPlayer(map.colliders);
 const arsenal = createArsenal(camera);
 const effects = createEffects(scene);
 const hud = createHud();
+hud.initMinimap(map);
 const input = createInput(renderer.domElement, onLockChange);
 const ray = new THREE.Raycaster(); ray.far = 90;
 const losRay = new THREE.Raycaster();
@@ -41,6 +42,7 @@ const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _g2 = new THREE.Vect
 let shakeT = 0, frozen = false, matchOver = false, suppressPause = false;
 let buyMenuOpen = false, plantAwarded = false, lastTimer = -1, wasFiring = false;
 let paused = false, grenadeQueued = false, shotPlantHold = false;
+let prevBombStatus = 'idle', contactFed = false;
 
 function los(from, to) { // LOS for bots: true when no solid mesh sits between the points
   _v1.copy(to).sub(from);
@@ -170,6 +172,7 @@ function fireOnce() { // hitscan raycast with spread; tracer, impact or bot dama
       const res = bots.damage(h.object, arsenal.damage(ud.part || 'torso'), ud.part || 'torso', player.state.position);
       anyHit = true;
       if (res && res.killed) killed = true; // credit flows via ctx onKill, not here
+      if (res && res.killed && (ud.part || 'torso') === 'head') state.headshots = (state.headshots | 0) + 1;
     } else {
       if (h.face) _v2.copy(h.face.normal).transformDirection(h.object.matrixWorld);
       else _v2.copy(_dir).negate();
@@ -191,6 +194,7 @@ function onPlanted(site) {
   hud.setMoney(state.money);
   hud.setObjective('BOMB PLANTED — DEFEND THE SITE');
   hud.feed('CHARGE PLANTED — SITE ' + site + '  +$300');
+  hud.feed('WARDENS ROTATING TO SITE ' + site);
   hud.setCaption(''); hud.setPlant(null);
 }
 function eligibleDefuser() {
@@ -246,7 +250,13 @@ function onRoundEnd(result) {
 }
 function onMatchEnd(winner) {
   state.matchWinner = winner; matchOver = true; suppressPause = true;
-  hud.showOverlay('match', { winner, win: winner === 'you' });
+  hud.showOverlay('match', {
+    winner, win: winner === 'you',
+    stats: {
+      kills: state.kills, deaths: state.deaths, headshots: state.headshots | 0,
+      money: state.money, you: state.score.you, foe: state.score.foe,
+    },
+  });
   if (document.pointerLockElement) document.exitPointerLock();
 }
 const objCtx = {
@@ -270,6 +280,7 @@ function refreshHud() {
 }
 function resetAll() {
   bots.reset(); objective.reset(); plantAwarded = false;
+  contactFed = false; prevBombStatus = 'idle';
   player.state.position.copy(map.spawns.you);
   player.state.velocity.set(0, 0, 0);
   player.state.yaw = 0; player.state.pitch = 0;
@@ -307,6 +318,7 @@ function buyItem(item) {
   if (item === 'armor') state.playerArmor = 100;
   if (item === 'ammo') arsenal.refill();
   if (item === 'shotgun') arsenal.switchTo('shotgun');
+  if (item === 'smg') arsenal.switchTo('smg');
   hud.showBuy(true, state); refreshHud();
 }
 hud.onPlay(() => {
@@ -354,7 +366,20 @@ function step(dt) {
     bombStatus: state.bomb.status,
     bombPos: state.bomb.site ? map.sites[state.bomb.site].pos : null,
     phase: state.phase,
+    playerCrouch: player.state.crouching,
+    playerAirborne: !player.state.onGround,
   });
+  // Radio: first foe to engage this round calls the contact + nearest site.
+  if (!contactFed && state.phase === 'live') {
+    for (const b of bots.list) {
+      if (b.team !== 'foe' || !b.alive || b.state !== 'engage') continue;
+      const dA = Math.hypot(b.group.position.x - map.sites.A.pos.x, b.group.position.z - map.sites.A.pos.z);
+      const dB = Math.hypot(b.group.position.x - map.sites.B.pos.x, b.group.position.z - map.sites.B.pos.z);
+      hud.feed('CONTACT — ' + (dA <= dB ? map.sites.A.label : map.sites.B.label));
+      contactFed = true;
+      break;
+    }
+  }
   // Single authoritative objective update, from this tick's real input,
   // BEFORE the round is resolved — so a plant completing on the deadline
   // tick counts, and a final grenade kill can still win the round.
@@ -369,6 +394,10 @@ function step(dt) {
   state.bomb.site = objective.state.site;
   state.bomb.progress = objective.state.progress;
   state.bomb.timer = objective.state.timer;
+  if (state.bomb.status === 'defusing' && prevBombStatus !== 'defusing') {
+    hud.feed('WARDEN DEFUSING — SITE ' + (state.bomb.site || ''));
+  }
+  prevBombStatus = state.bomb.status;
   // Grenades: the throw command is queued in frame() and consumed here,
   // inside the fixed step — never once per rendered frame.
   if (grenadeQueued) {
@@ -441,8 +470,12 @@ function frame(now) {
     if (state.phase === 'buy') buyItem('grenade');
     else if (state.owned.shotgun) arsenal.switchTo('shotgun');
   }
-  if (input.pressed('Digit3') && state.phase === 'buy') buyItem('armor');
+  if (input.pressed('Digit3')) {
+    if (state.phase === 'buy') buyItem('armor');
+    else if (state.owned.smg) arsenal.switchTo('smg');
+  }
   if (input.pressed('Digit4') && state.phase === 'buy') buyItem('ammo');
+  if (input.pressed('Digit5') && state.phase === 'buy') buyItem('smg');
   if (input.pressed('KeyB') && state.phase === 'buy') {
     buyMenuOpen = !buyMenuOpen; hud.showBuy(buyMenuOpen, state);
   }
@@ -463,6 +496,7 @@ function frame(now) {
   while (acc >= STEP && n < 5) { step(STEP); acc -= STEP; n++; }
   if (acc > STEP * 5) acc = 0;
   frameSyncCamera();
+  hud.updateMinimap(player.state, bots.list, typeof bots.now === 'function' ? () => bots.now() : null);
   renderer.render(scene, camera);
 }
 // ---- ?shot= deterministic captures: settle, frame, render twice, freeze ----
@@ -538,7 +572,7 @@ function runShot(name) {
     hud.setObjective('PLANT THE CHARGE — A CRANE BAY OR B TANK FARM');
   } else if (name === 'buy') {
     state.phase = 'buy'; state.timer = 15; state.money = 2450;
-    state.owned = { shotgun: false, grenades: 0, armor: false };
+    state.owned = { shotgun: false, grenades: 0, armor: false, smg: false };
     player.state.position.set(0, 0, 14);
     settle(20);
     aimAt(0, 1.5, -10);
@@ -547,11 +581,21 @@ function runShot(name) {
     hud.setTimer(15, 'buy');
     hud.setObjective('BUY PHASE — GEAR UP');
   } else if (name === 'result') {
-    // Win a real round: go live, drop all four foes through the real
-    // damage path, and let the round system end it.
-    round.skipBuy();
-    for (const f of foes) bots.damage(f.torso, 200, 'torso', player.state.position);
-    settle(90); // round ends (ALL WARDENS DOWN) inside the first steps
+    // Win the FULL MATCH for real: five round wins through the real damage
+    // path, letting the round system end each round and auto-advance.
+    for (let r = 0; r < 5 && !state.matchWinner; r++) {
+      round.skipBuy();
+      let hi = 0;
+      for (const f of foes) {
+        const part = hi % 2 === 0 ? 'head' : 'torso';
+        const res = bots.damage(f.torso, 200, part, player.state.position);
+        if (res && res.killed && part === 'head') state.headshots = (state.headshots | 0) + 1;
+        hi += 1;
+      }
+      settle(90); // round ends (ALL WARDENS DOWN) inside the first steps
+      state.timer = 0.2; // end phase -> auto-advance to next buy, or match
+      settle(300); // until phase 'buy' (next round) or 'match' (5th win)
+    }
     const site = map.sites.A.pos;
     player.state.position.set(site.x + 4, 0, site.z + 5);
     settle(20);
@@ -561,6 +605,9 @@ function runShot(name) {
   // resetAll() opens the buy menu while the phase is still 'buy'; close it again for every
   // shot except the buy shot itself.
   hud.showBuy(name === 'buy', state);
+  // Shots never run frame(), so paint the minimap once here (live play
+  // refreshes it every frame from frame()).
+  hud.updateMinimap(player.state, bots.list, typeof bots.now === 'function' ? () => bots.now() : null);
   paintTwiceThenReady();
 }
 window.addEventListener('resize', () => {
